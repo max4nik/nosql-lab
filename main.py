@@ -2,6 +2,8 @@ import requests
 import uvicorn
 
 from fastapi import FastAPI
+
+from cloud.elasticsearch.elasticsearch_manager import ElasticSearch
 from models import Link
 from strategies.write_to_cloud import CloudStrategy
 from strategies.write_to_console import ConsoleStrategy
@@ -11,6 +13,9 @@ from settings import STRATEGY
 # init webhook
 app = FastAPI()
 
+# init elastic
+es_manager = ElasticSearch()
+
 
 def get_strategy(file):
     if STRATEGY == 'console':
@@ -19,6 +24,18 @@ def get_strategy(file):
         return FileStrategy(file)
     elif STRATEGY == 'cloud':
         return CloudStrategy(file)
+
+
+@app.get('/top_animals')
+def get_top_animals(size: int = 5):
+    top_animals = es_manager.get_top_animals(size)
+    return {'top_animals': top_animals}
+
+
+@app.get('/top_streets')
+def get_top_streets(size: int = 5):
+    top_streets = es_manager.get_top_streets(size)
+    return {'top_streets': top_streets}
 
 
 @app.post('/load')
