@@ -1,43 +1,53 @@
-import os
-
 import requests
 import uvicorn
-from dotenv import load_dotenv
-from fastapi import FastAPI, Request
 
+from fastapi import FastAPI
 from models import Link
 from strategies.write_to_cloud import CloudStrategy
 from strategies.write_to_console import ConsoleStrategy
 from strategies.write_to_file import FileStrategy
-
-# loading .env vars
-load_dotenv()
+from settings import STRATEGY
 
 # init webhook
 app = FastAPI()
 
 
-def get_strategy():
-    strategy = os.environ.get('STRATEGY')
-    if strategy == 'console':
-        return ConsoleStrategy()
-    elif strategy == 'file':
-        return FileStrategy()
-    elif strategy == 'cloud':
-        return CloudStrategy()
+def get_strategy(file):
+    if STRATEGY == 'console':
+        return ConsoleStrategy(file)
+    elif STRATEGY == 'file':
+        return FileStrategy(file)
+    elif STRATEGY == 'cloud':
+        return CloudStrategy(file)
 
 
 @app.post('/load')
-def load_file_from_link(item: Link):
-    print(item.link)
-    file = requests.get(item.link)
-    strategy = get_strategy()
+async def load_file_from_link(item: Link):
+    file_link = item.file
+    strategy = get_strategy(file_link)
 
-    if strategy:
-        strategy.write(item.filename, file.json())
-        return {'message': f'File processed with{strategy}'}
-    else:
+    if not strategy:
         return {'message': f'No strategy specified'}
+
+    if isinstance(strategy, CloudStrategy) and strategy.is_ignored():
+        return {'message': 'Ignoring file because it was already processed'}
+
+    limit = 6000
+    offset = 0
+    has_next_chunk = True
+
+    strategy.on_start()
+    while has_next_chunk:
+        file_response = requests.get(f'{file_link}?$limit={limit}&$offset={offset}')
+        file_json = file_response.json()
+        if len(file_json) != 0:
+            print('PROCESSING NEXT CHUNK...')
+            await strategy.write(file_json)
+            offset += limit
+        else:
+            has_next_chunk = False
+    strategy.on_finish()
+    return {'message': f'File processed with{strategy}'}
 
 
 if __name__ == "__main__":
